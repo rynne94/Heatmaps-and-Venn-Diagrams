@@ -1,0 +1,297 @@
+# set the working directoyy
+setwd()
+getwd()
+# installs required
+install.packages('tidyverse')
+library(tidyverse)
+if (!require("gplots")) {
+  install.packages("gplots", dependencies = TRUE)
+  library(gplots)
+}
+if (!require("RColorBrewer")) {
+  install.packages("RColorBrewer", dependencies = TRUE)
+  library(RColorBrewer)
+}
+library(gplots)
+library(RColorBrewer)
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("pcaMethods")
+library(pcaMethods)
+
+library('VennDiagram')
+
+library(tximport)
+library(tidyverse)
+library(GenomicFeatures)
+library(DelayedArray) 
+library(DESeq2)
+library(magrittr)
+
+#load annotation file
+library(readr)
+annotation <- read_csv("annotation.csv")
+View(annotation)
+str(annotation)
+# select the columns that we need now
+
+annotation <- annotation %>% 
+  select(hgnc_symbol, ensemble_gene_id)
+
+
+annotation <- select("hgnc_symbol", "ensembl_gene_id")
+
+# read the tables of fold changes and p-values
+
+knockdown_total <- read_csv('results_noDEX_KDcomparison_total.csv')
+knockdown_total <- rename(knockdown_total, 'gene_ID' = X1)
+knockdown_80S <-  read_csv('results_noDEX_KDcomparison_outlier_80S.csv')
+knockdown_80S <- rename(knockdown_80S, 'gene_ID' = X1)
+knockdown_poly <- read_csv('results_noDEX_KDcomparison_poly.csv')
+knockdown_poly <- rename(knockdown_poly, 'gene_ID' = X1)
+
+# we check which genes are in common (inner_join) and get the number (dim)
+dim(inner_join(knockdown_total, knockdown_80S, by = "X1")) # 12756 common
+dim(inner_join(knockdown_total, knockdown_poly, by = "X1")) # 14299 common
+dim(inner_join(knockdown_80S, knockdown_poly, by = "X1")) # 12381 common
+
+# PCA
+pca(knockdown_total)
+
+# select genes that are statistically significant FDR<0.1
+knockdown_total_p <- knockdown_total %>% 
+  filter(padj <0.1) %>% 
+  select(gene_ID)
+
+knockdown_80S_p <- knockdown_80S %>% 
+  filter(padj <0.1)%>% 
+  select(gene_ID)
+
+knockdown_poly_p <- knockdown_poly %>% 
+  filter(padj<0.1)%>% 
+  select(gene_ID)
+
+# draw a Venn
+?venn
+input <- list(KD_80S_p,KD_poly_p,KD_total_p)
+tmp <- venn(input)
+venn(input)
+str(tmp)
+attr(tmp, 'intersections')
+
+#join annotation file to ensembl id for signifcant DEGs
+
+KD_total_p <- inner_join(annotation, KD_total_p, by = 'gene_ID')
+KD_80S_p <- inner_join(annotation, KD_80S_p, by = 'gene_ID')
+KD_poly_p <- inner_join(annotation, KD_poly_p, by = 'gene_ID')
+
+
+# join: get FC levels from 80S and poly that change in total
+total_80S <- semi_join(knockdown_80S, KD_total_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_80S = log2FoldChange)
+total_poly <- semi_join(knockdown_poly,KD_total_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_poly = log2FoldChange)
+total <- knockdown_total %>% 
+  filter(padj <0.1) %>% 
+  select(gene_ID,log2FoldChange ) %>% 
+  rename(FC_total = log2FoldChange)
+
+# now join all datasets
+total_80_S <- full_join(total, total_80S)
+all_genes_total_KD <- full_join(total_80_S, total_poly) 
+  filter(!is.na(FC_80S)) # removing the genes not present in 80S (we didnt)
+
+head(all_genes_total_KD)
+summary(all_genes_total_KD)
+
+
+# join: get FC levels from total and poly that change in 80S
+mono_total <- semi_join(knockdown_total, KD_80S_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_total = log2FoldChange)
+mono_poly <- semi_join(knockdown_poly,KD_80S_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_poly = log2FoldChange) 
+
+mono <- dex_80S%>% 
+  filter(padj <0.1) %>% 
+  select(gene_ID,log2FoldChange ) %>% 
+  rename(FC_80S = log2FoldChange)
+
+# now join all datasets
+mono_total_join <- full_join(mono, mono_total)
+all_genes_80S_KD <- full_join(mono_total_join, mono_poly) 
+
+summary(all_genes_80S) # there are 8 missing genes in total and 7 in poly
+
+# removing the genes not present in 80S (we dont)
+all_genes_80S_KD <- full_join(mono_total_join, mono_poly) %>% 
+  filter(!is.na(FC_total),
+         !is.na(FC_poly)) 
+
+#ATTEMPT to join: get FC levels from total and 80S that change in poly
+poly_total <- semi_join(knockdown_total, KD_poly_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_total = log2FoldChange)
+poly_mono <- semi_join(knockdown_80S,KD_poly_p) %>% 
+  select(gene_ID, log2FoldChange) %>% 
+  rename(FC_mono = log2FoldChange) 
+  poly <- dex_poly%>% 
+    filter(padj <0.1) %>% 
+    select(gene_ID,log2FoldChange ) %>% 
+    rename(FC_poly = log2FoldChange)
+  
+#now join all datasets
+poly_total_join <- full_join(poly, poly_total)
+all_genes_poly_KD <- full_join(poly_total_join, poly_mono) 
+
+summary(all_genes_poly_KD) 
+
+ #if you want to remove NAs (we dont)
+all_genes_poly_KD <- full_join(poly_total_join, poly_mono) %>% 
+  filter(!is.na(FC_total),
+         !is.na(FC_mono)) 
+
+#change ensembl ID for gene ID
+all_genes_total_KD <- inner_join(annotation, all_genes_total_KD, by = 'gene_ID')
+summary(all_genes_total_KD) 
+
+all_genes_80S_KD <- inner_join(annotation, all_genes_80S_KD, by = 'gene_ID')
+summary(all_genes_80S_KD)
+
+all_genes_poly_KD <- inner_join(annotation, all_genes_poly_KD, by = 'gene_ID')
+summary(all_genes_poly_KD)
+
+#get ensemble ID for NA genes
+total_NA <- all_genes_total_KD %>% 
+  dplyr::filter(is.na (gene_name)) %>% 
+  dplyr::select(-gene_name) %>% 
+  dplyr::rename(gene_name = 'gene_ID')
+
+mono_NA <- all_genes_80S_KD %>% 
+  dplyr::filter(is.na (gene_name)) %>% 
+  dplyr::select(-gene_name) %>% 
+  dplyr::rename(gene_name = 'gene_ID')
+
+poly_NA <- all_genes_poly_KD %>% 
+  dplyr::filter(is.na (gene_name)) %>% 
+  dplyr::select(-gene_name) %>% 
+  dplyr::rename(gene_name = 'gene_ID')
+
+#join ensemble ID NAs with gene names and remove NAs from gene name
+all_genes_total_KD <- full_join(total_NA, all_genes_total_KD) %>% 
+  dplyr::filter(!is.na(gene_name))
+head(all_genes_total)
+
+all_genes_80S_KD <- full_join(mono_NA, all_genes_80S_KD) %>% 
+  dplyr::filter(!is.na(gene_name))
+head(all_genes_80S)
+
+all_genes_poly_KD <- full_join(poly_NA, all_genes_poly_KD) %>% 
+  dplyr::filter(!is.na(gene_name))
+head(all_genes_poly)
+
+#removing 5th column (which is empty gene list)
+all_genes_total_KD <- all_genes_total_KD[, -5]
+all_genes_80S_KD <- all_genes_80S_KD[, -5]
+all_genes_poly_KD <- all_genes_poly_KD[, -5]
+
+write_csv(all_genes_total_KD, file = 'csv/all_genes_total_KD.csv')
+write_csv(all_genes_80S_KD, file = 'csv/all_genes_80S_KD.csv')
+write_csv(all_genes_poly_KD, file = 'csv/all_genes_poly_KD.csv')
+
+# make it into a matrix to draw heatmap
+
+all_genes_total_KD <- as.data.frame(all_genes_total_KD) # otherwise the rownames do not show in the heatmap
+row.names(all_genes_total_KD) <- all_genes_total_KD$gene_ID # assign labels in column gene_ID as rownames
+all_genes_tota_KDl$gene_ID <-  NULL  # enables making a matrix in the next step with only numerical values
+expmatrix_total <- as.matrix(all_genes_total_KD)  
+
+summary(expmatrix_total)
+
+all_genes_80S_KD <- as.data.frame(all_genes_80S_KD) # otherwise the rownames do not show in the heatmap
+row.names(all_genes_80S_KD) <- all_genes_80S_KD$gene_ID # assign labels in column gene_ID as rownames
+all_genes_80S_KD$gene_ID <-  NULL  # enables making a matrix in the next step with only numerical values
+expmatrix_80S <- as.matrix(all_genes_80S_KD)  
+
+all_genes_poly_KD <- as.data.frame(all_genes_poly_KD) # otherwise the rownames do not show in the heatmap
+row.names(all_genes_poly_KD) <- all_genes_poly_KD$gene_ID # assign labels in column gene_ID as rownames
+all_genes_poly_KD$gene_ID <-  NULL  # enables making a matrix in the next step with only numerical values
+expmatrix_poly <- as.matrix(all_genes_poly_KD)  
+
+#clustering pearson
+
+hc <- hclust(as.dist(1-cor(expmatrix_total, method="pearson")), method = "complete")
+hr <- hclust(as.dist(1-cor(t(expmatrix_total), method="pearson")), method="complete")
+plot(hc)
+plot(hr)
+
+hc2 <- hclust(as.dist(1-cor(expmatrix_80S, method="pearson")), method = "complete")
+hr2 <- hclust(as.dist(1-cor(t(expmatrix_80S), method="pearson")), method="complete")
+plot(hc2)
+
+hc3 <- hclust(as.dist(1-cor(expmatrix_poly, method="pearson")), method = "complete")
+hr3 <- hclust(as.dist(1-cor(t(expmatrix_poly), method="pearson")), method="complete")
+plot(hc3)
+
+#trying new color packs
+install.packages("viridis")
+library(viridis)
+
+# creates a own color palette from red to green
+my_palette <- colorRampPalette(c("green", "white", "magenta"))(n = 999)
+my_palette <- colorRampPalette(bluered(n=999))
+my_palette <- colorRampPalette(plasma(n=999))
+my_palette <- colorRampPalette(viridis(n=999))
+colors <- c(seq(-2.5,-0.11,length=450),seq(-0.1,0.1,length=100),seq(0.11,2.5,length=450))
+
+# creates a 5 x 5 inch image
+png("heatmap_total_DEX_plasma.png",    # create PNG for the heat map        
+    width = 5*300,        # 5 x 300 pixels
+    height = 5*300,
+    res = 300,            # 300 pixels per inch
+    pointsize = 8)        # smaller font size
+
+#USE FIRST LINE FOR HEATMAP WITH COLOR BREAKS
+heatmap.2(expmatrix_total,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", na.color="black", margin=c(8, 10), cexRow=0.4, cexCol=0.9, breaks=colors, main="DEGs Total", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_total,Colv= as.dendrogram(hc),Rowv= as.dendrogram(hr),  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, breaks=colors, main="DEGs Total", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_total,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, main="DEGs Total", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_total,Colv= NULL,Rowv= as.dendrogram(hr),  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, main="DEGs Total", ylab="Differentially Expressed Genes")
+
+dev.off()               # close the PNG device
+
+#MAKE A SEPARATE COLOR OBJECT FOR EACH HEATMAP
+colors1 <- c(seq(-4.5,-0.5,length=450),seq(-0.49,0.2,length=100),seq(0.21,3,length=450))
+
+#creates a 5 x 5 inch image
+png("heatmap_80S_DEX_plasma.png",    # create PNG for the heat map        
+    width = 5*300,        # 5 x 300 pixels
+    height = 5*300,
+    res = 300,            # 300 pixels per inch
+    pointsize = 8)        # smaller font size
+
+heatmap.2(expmatrix_80S,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", na.color="black", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, breaks=colors1, main="DEGs 80S", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_80S,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, breaks=colors, main="DEGs 80S", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_80S,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, main="DEGs 80S", ylab="Differentially Expressed Genes")
+
+dev.off()               # close the PNG device
+
+#make a separate colors object for each heatmap
+colors2 <- c(seq(-3,-0.2,length=450),seq(-0.19,0.19,length=100),seq(0.2,3,length=450))
+
+# creates a 5 x 5 inch image
+png("heatmap_poly_DEX_plasma.png",    # create PNG for the heat map        
+    width = 5*300,        # 5 x 300 pixels
+    height = 5*300,
+    res = 300,            # 300 pixels per inch
+    pointsize = 8)        # smaller font size
+
+heatmap.2(expmatrix_poly,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", na.color="black", margin=c(8, 10), cexRow=0.4, cexCol=0.9, breaks=colors2, main="DEGs Poly", ylab="Differentially Expressed Genes")
+heatmap.2(expmatrix_poly,Colv= NULL,Rowv= NULL,  col= my_palette, trace="none", scale="none", margin=c(8, 10), cexRow=0.4, cexCol=0.9, main="DEGs Poly", ylab="Differentially Expressed Genes")
+
+dev.off()               # close the PNG device
+

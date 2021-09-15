@@ -34,11 +34,11 @@ library(readr)
 annotation <- read_csv("annotation.csv")
 
 #load DEG files previously created and filter for gene name and fold change 
-dex_p_total <- read_csv('csv/C_DEX_all_genes_total.csv') %>% 
+C_DEX_all_genes_total <- read_csv('csv/C_DEX_all_genes_total.csv') %>% 
   dplyr::select(gene_name, FC_total)
-dex_p_80S <- read_csv('csv/C_DEX_all_genes_80S.csv') %>% 
+C_DEX_all_genes_80S <- read_csv('csv/C_DEX_all_genes_80S.csv') %>% 
   dplyr::select(gene_name, FC_80S) 
-dex_p_poly <- read_csv('csv/C_DEX_all_genes_poly.csv') %>% 
+C_DEX_all_genes_poly <- read_csv('csv/C_DEX_all_genes_poly.csv') %>% 
   dplyr::select(gene_name, FC_poly) 
 
 KD_DEX_all_genes_total <- read_csv('csv/KD_DEX_all_genes_total.csv')%>% 
@@ -161,9 +161,9 @@ poly_KD <- semi_join(KD_dex_poly, dex_p_poly)%>%
 total <- full_join(dex_p_total, total_KD)
 
 #join significant control and KD datasets (for separate heatmap of only DEGs)
-total_join <- full_join(C_DEX_all_genes_total, KD_DEX_all_genes_total)
-mono_join <- full_join(C_DEX_all_genes_80S, KD_DEX_all_genes_80S)
-poly_join <- full_join(C_DEX_all_genes_poly, KD_DEX_all_genes_poly)
+total_join <- full_join(C_DEX_all_genes_total, KD_DEX_all_genes_total, by = 'gene_name')
+mono_join <- full_join(C_DEX_all_genes_80S, KD_DEX_all_genes_80S, by = 'gene_name')
+poly_join <- full_join(C_DEX_all_genes_poly, KD_DEX_all_genes_poly, by = 'gene_name')
 
 write_csv(total_join, file = 'csv/C_KD_DEX_total.csv')
 write_csv(mono_join, file = 'csv/C_KD_DEX_mono.csv')
@@ -174,8 +174,16 @@ total_join <- as.data.frame(total_join) # otherwise the rownames do not show in 
 row.names(total_join) <- total_join$gene_name # assign labels in column gene_ID as rownames
 total_join$gene_name <-  NULL  # enables making a matrix in the next step with only numerical values
 expmatrix_total <- as.matrix(total_join)  
-
 summary(expmatrix_total)
+
+#create venn diagrams to show the overlap between C and KD
+C_T_Venn <- C_DEX_all_genes_total %>% 
+  select(gene_name) 
+KD_T_Venn <- KD_DEX_all_genes_total %>% 
+  select(gene_name)
+
+input <- list(C_T_Venn, KD_T_Venn)
+venn(input)
 
 mono_join <- as.data.frame(mono_join) # otherwise the rownames do not show in the heatmap
 row.names(mono_join) <- mono_join$gene_name # assign labels in column gene_ID as rownames
@@ -183,11 +191,29 @@ mono_join$gene_name <-  NULL  # enables making a matrix in the next step with on
 expmatrix_80S <- as.matrix(mono_join)  
 summary(expmatrix_80S)
 
+#create venn diagrams to show the overlap between C and KD
+C_80S_Venn <- C_DEX_all_genes_80S %>% 
+  select(gene_name) 
+KD_80S_Venn <- KD_DEX_all_genes_80S %>% 
+  select(gene_name)
+
+input <- list(C_80S_Venn, KD_80S_Venn)
+venn(input)
+
 poly_join <- as.data.frame(poly_join) # otherwise the rownames do not show in the heatmap
 row.names(poly_join) <- poly_join$gene_name # assign labels in column gene_ID as rownames
 poly_join$gene_name <-  NULL  # enables making a matrix in the next step with only numerical values
 expmatrix_poly <- as.matrix(poly_join)  
 summary(expmatrix_poly)
+
+#create venn diagrams to show the overlap between C and KD
+C_poly_Venn <- C_DEX_all_genes_poly %>% 
+  select(gene_name) 
+KD_poly_Venn <- KD_DEX_all_genes_poly %>% 
+  select(gene_name)
+
+input <- list(C_poly_Venn, KD_poly_Venn)
+venn(input)
 
 #trying new color packs
 install.packages("viridis")
